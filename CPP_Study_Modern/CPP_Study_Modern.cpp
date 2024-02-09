@@ -215,6 +215,215 @@ void TestFighter_RValueRef(Fighter&& fighter) { }       //매개 변수 타입�
 
 #pragma endregion
 
+
+#pragma region 전달 참조 (forwarding reference)
+// 모던 CPP 이전 기존 이름은 보편 참조(universal reference)
+// 
+// &&를 두 번 -> 오른값 참조
+// 
+// &가 두번 등장하면 무조건 오른값? X
+// 
+// -----아래 코드 예시 확인-----
+// 
+// 왼값, 오른값을 따로 받는 버전을 만들면 되는데, 왜 이런 문법을 지원하는가??
+// - ex) template 함수 인자의 개수가 하나만 늘어나도 2x2 = 4개의 버전을 만들어야함
+// 
+// 
+// 
+// => 전달 참조는 forward를 사용하면 된다!
+// 
+// 
+
+class Knight2
+{
+public:
+    Knight2() { cout << "기본 생성자" << endl; }
+    Knight2(const Knight2&) { cout << "복사 생성자" << endl; }
+    Knight2(Knight2&&) noexcept { cout << "이동 생성자" << endl; }
+
+};
+
+void Test_RValueRef(Knight2&& k)    //오른값 참조 변수를 받는 함수
+{
+    
+}
+
+void Test_Copy(Knight2 k)
+{
+
+}
+
+// 형식 연역이 일어나는 template나 auto에서 전달 참조가 일어나는 예시
+template<typename T>
+void Test_ForwardingRef(T&& param)      // T&&에 const나 부가적인 것을 붙이면 전달 참조로 동작되지 않음
+{
+    // TODO
+
+
+    // 헷갈리기 쉬운 부분
+    Test_Copy(param);       //main 함수 코드대로, Test Copy 함수가 받는 T&& param이 오른값으로 전달될지라도, param 자체는 왼값(재사용가능)이기 때문에
+    //                         Test_Copy()에 들어가는 param은 왼값으로 동작한다. Knight2의 이동 생성자가 아닌, 복사 생성자가 실행됨!!
+    // => 오른값 참조로 Tset_ForwardingRef를 전달했지만, T&& param 자체는 왼값이기 때문에 Test_Copy에 param을 전달할 때는 std::move를 해줘야 의도한 오른값 참조 전달이 된다.
+
+
+
+    // 사용 예시)
+    // Test_ForwardingRef 함수에서 param이 왼값으로 전달되었다면, Test_Copy(param) 처럼 복사하는 형태로 사용할 것임
+    // param이 오른값으로 전달되었다면, Test_Copy(std::move(param)) 처럼 오른값 참조로 유지하며 사용할 것임
+   
+    // -> 위 두 케이스를 하나로 통일하는 문법!!!
+    Test_Copy(std::forward<T>(param));     //전달 참조를 받아 사용할 때는 std::forward사용
+    //위 결과로 왼값 전달 -> 복사 생성자 실행 , 오른값 전달 -> 이동 생성자 실행됨
+}
+
+#pragma endregion
+
+#pragma region 람다
+// 함수 객체를 빠르게 만드는 문법
+// 코드 참조
+// [ 캡처 ] ( 인자값 ) { 구현부 }
+
+enum class ItemType
+{
+    None,
+    Armor,
+    Weapon
+};
+
+enum class Rarity
+{
+    Common,
+    Rare,
+    Unique
+};
+
+class Item
+{
+public:
+    Item() {}
+    Item(int itemId, Rarity rarity, ItemType type) : _itemId(itemId), _rarity(rarity), _type(type)
+    {
+
+    }
+
+public:
+    int _itemId = 0;
+    Rarity _rarity = Rarity::Common;
+    ItemType _type = ItemType::None;
+};
+
+
+#pragma endregion
+
+#pragma region 스마트포인터
+// 포인터를 알맞는 정책에 따라 관리하는 객체 (포인터를 래핑해서 사용)
+// 
+// 왜 필요한가?
+// - 메모리 오염을 막고, 코드 안전성을 높이기 위해
+// 
+// 
+// *shared_ptr*, weak_ptr, unique_ptr 3가지 종류
+// 
+// 
+// shared_ptr만 사용하면 사이클 문제 발생
+// - k1 k2이 서로 target으로 지정했을 때, 하나가 delete되어도 메모리가 끝까지 남아있음 (계속 주시하는 target은 남아있기 때문에, 결국 따로 nullptr을 해줘야하는 문제 발생)
+// 
+// => 위와 같은 순환구조가 발생할 여지가 있으면, wear_ptr을 사용\
+// shared_ptr와는 다르게 객체의 생명주기(refCount)에 관여하지 않지만, 간접적으로 객체가 삭제되었는지 확인하며 작업할 수 있음)
+//      확인 후, 다시 사용할 때는 shared_ptr로 변환해서 사용
+// weak_ptr 내부 구조 잘 모르겠음, 다시 공부하기
+// 
+// 
+class Knight3
+{
+public:
+    Knight3() { cout << "Knight3()" << endl; }
+    ~Knight3() { cout << "Knight3 소멸" << endl; }
+
+    void Attack()
+    {
+        if (_target)
+        {
+            _target->_hp -= _damage;
+            cout << "HP : " << _target->_hp << endl;
+        }
+    }
+public:
+    int _hp = 100;
+    int _damage = 10;
+    Knight3* _target = nullptr;
+};
+
+class RefCountBlock
+{
+public:
+    int _refCount = 1;
+};
+
+
+// shared_ptr 구현
+// 레퍼런스 카운터를 관리!
+template<typename T>
+class SharedPtr
+{
+public:
+    SharedPtr(){}
+    SharedPtr(T* ptr) : _ptr(ptr)
+    {
+        if (_ptr != nullptr)
+        {
+            _block = new RefCountBlock();
+            cout << "RefCount : " << _block->_refCount << endl;
+        }
+    }
+
+    //복사 생성자
+    SharedPtr(const SharedPtr& sptr) : _ptr(sptr._ptr), _block(sptr._block)
+    {
+        if (_ptr != nullptr)
+        {
+            _block->_refCount++;
+        }
+
+    }
+
+    //복사 대입 연산자
+    void operator=(const SharedPtr& sptr)
+    {
+        _ptr = sptr._ptr;
+        _block = sptr._block;
+
+        if (_ptr != nullptr)
+        {
+            _block->_refCount++;
+        }
+
+    }
+
+    ~SharedPtr() 
+    {
+        if (_ptr != nullptr)
+        {
+            _block->_refCount--;
+
+            if (_block->_refCount == 0)
+            {
+                delete _ptr;
+                delete _block;
+                cout << "Delete Data" << endl;
+            }
+        }
+    }
+
+public:
+    T* _ptr = nullptr;
+    RefCountBlock* _block;
+};
+#pragma endregion
+
+
+
+
 int main()
 {
 #pragma region auto
@@ -322,5 +531,129 @@ int main()
 
 #pragma endregion
 
+#pragma region 전달 참조 (forwarding reference)
+
+    Knight2 k2_1;
+
+    //일반 함수에 왼값을 넣었을 때
+    Test_RValueRef(std::move(k2_1));        //rvalue_cast
+    //Test_RValueRef(k2_1);
+
+
+    //template 함수에 왼값을 넣었을 때
+    //오른값 참조를 인자로 지정했는데, 왼값이 통과가 된다??? 
+    Test_ForwardingRef(k2_1);       //왼값으로 받아진다.
+    Test_ForwardingRef(std::move(k2_1));    //오른값으로 받아진다.
+
+
+    //auto&&(오른값)에 왼값을 넣었을 때
+    auto&& k2_2 = k2_1; // 이 경우에도 왼값으로 받아짐
+    //auto&& k2_2 = std::move(k2_1);  //당연히 원래 타입 선언대로 오른값으로 해도 받아진다.
+
+    // template나 auto를 이용해 오른값으로 선언한 변수에 왼값을 대입하면, 왼값으로 자동 캐스팅이 된다.
+    // 형식 연역(type deduction)이 일어날 때, 오른값 -> 왼값으로 자동으로 대입해줌
+    // 이를 전달 참조라고 한다.
+    // (왼값을 넣으면 왼값 참조, 오른값을 넣으면 오른값 참조)
+
+
+
+
+    //전달 참조를 구별하는 방법
+    Knight2& k2_3 = k2_1;   //왼값 참조
+    Knight2&& k2_4 = std::move(k2_1);   //오른값 참조
+    // 오른값: 왼값이 아니다 = 단일식에서 벗어나면 사용x
+    // 오른값 참조 : 오른값만 참조할 수 있는 참조 타입
+
+
+    //Test_RValueRef(k2_4);   //오른값 타입 매개변수에 오른값을넣었는데 안된다>>>?
+    Test_RValueRef(std::move(k2_4));
+    // k2_4는 오른값 참조이지, 오른값이 아니다! 단일식에서 벗어나도 사용 가능! 
+    // 따라서 오른값을 매개변수로 받는 위 함수에서 k2_4(오른값 참조)는 못들어감!
+    // => 그래서 k2_4에 std::move를 다시 붙혀준다.
+
+    // std::move 기능은 오른값 참조로 변경해주는 함수
+    // 그러나 Knight2&& k2_4 = std::move(k2_1)으로 받는 순간 k2_4는 왼값이라고 보게 되어 위 함수가 통과 안되는 것임
+
+#pragma endregion
+
+
+#pragma region 람다
+    
+    vector<Item> v;
+
+    v.push_back(Item(1, Rarity::Common, ItemType::Weapon));
+    v.push_back(Item(2, Rarity::Common, ItemType::Armor));
+    v.push_back(Item(3, Rarity::Rare, ItemType::None));
+    v.push_back(Item(4, Rarity::Unique, ItemType::Weapon));
+
+    // 람다 = 함수 객체를 손쉽게 만드는 문법
+    {
+        struct IsUniqueItem
+        {
+            bool operator()(Item& item)
+            {
+                return item._rarity == Rarity::Unique;
+            }
+        };
+
+        // (개인)헷갈리는 부분 보충 설명
+        // IsUniqueItem() --> 구조체의 생성자임!  Pr _pr을 인자로 받아 안에서 (&Item)로 실행하는 부분이 operator()(Item &item)이 실행되는 부분임
+
+
+
+        // 람다 표현식
+        // 클로저 : 람다에 의해 만들어진 실행지점 객체
+        auto isUniqueLamda = [](Item& item) { return item._rarity == Rarity::Unique; };
+
+        // 람다 첫 부분 "[ ]" {캡처(capture)} : 함수 객체 내부에 변수를 저장하는 개념과 유사
+        // - 람다식 외부에 있는 변수를 { } 부분에 사용가능하게함
+        // - 기본 캡처 모드 : 값 (복사) 방식(=) , 참조 방식(&) 
+        //          ex) [=] or [&]
+        // 아무 것도 안쓰면, 람다식 외부에 있는 변수 사용 불가, (람다식이 함수 객체(클래스)로 어떻게 변형되는지 알아보기)
+        // 변수마다 캡처 모드를 지정해서 사용가능,  ex) [&ItemId, &rarity, type](..){..};
+        auto findIt = find_if(v.begin(), v.end(), isUniqueLamda);
+        if (findIt != v.end())
+            cout << "Item id " << findIt->_itemId << endl;
+
+
+
+        /*int itemId = 4;
+
+        auto f = [=](Item& item) {return item._itemId == itemId; };*/
+    }
+
+#pragma endregion
+
+#pragma region 스마트포인터
+    {
+        Knight3* k3_1 = new Knight3();
+        Knight3* k3_2 = new Knight3();
+
+        k3_1->_target = k3_2;
+
+        k3_1->Attack();
+
+        delete k3_2;
+        //k3_1->Attack();     //메모리 오염
+        // - k3_1의 target이 nullptr이 아니면, delete k3_2이 호출이 되면 안된다!!
+    }
+    
+    cout << "---------------------------" << endl;
+
+
+    {
+        SharedPtr<Knight3> k3_1(new Knight3());
+        SharedPtr<Knight3> k3_2 = k3_1;
+        // k3_2가 new Knight3()의 ref를 가지고 있기 때문에, delete k3_1해도 new Knight3()이 삭제되지 않을 것임
+    
+        // delete를 개발자가 일일히 작성하지 않아도, SharedPtr이 소멸될 때, ref Count가 0이면 delete를 해주게끔 구현함
+    
+        // cpp에서 지원하는 문법 이름 : shared_ptr<T> sptr = make_shared<T>();
+    }
+    
+
+
+
+#pragma endregion
 
 }
